@@ -6,13 +6,16 @@
 #include <chrono>
 #include <cmath>
 #include <Eigen/Dense>
+#include <algorithm> // Include this for std::clamp
 
 using namespace std::chrono_literals;
 
 class MazeSolver : public rclcpp::Node
 {
 public:
-    MazeSolver() : Node("distance_controller"), current_goal_index_(0)
+    MazeSolver(int scene_number) 
+        : Node("distance_controller"), current_goal_index_(0), scene_number_(scene_number),
+          max_linear_speed_(0.2), max_angular_speed_(0.2)  // Set maximum speeds here
     {
         // Initialize publisher
         velocity_publisher_ = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 10);
@@ -21,21 +24,46 @@ public:
         odometry_subscriber_ = this->create_subscription<nav_msgs::msg::Odometry>(
             "/odometry/filtered", 10, std::bind(&MazeSolver::odometryCallback, this, std::placeholders::_1));
 
-        // Hardcoded distance goals in meters
-        distance_goals_ = {
-            {0.460,	-0.050},
-            {0.460,	-1.367},
-            {1.026,	-1.367},
-            {1.026,	-0.877},
-            {1.387,	-0.877},
-            {1.387,	-0.357},
-            {1.933,	-0.357},
-            {1.933,	 0.568},
-            {1.406,	 0.568},
-            {1.406,	 0.191},
-            {0.918,	 0.191},
-            {0.650,	 0.522},
-            {0.102,	 0.522}};
+        // Hardcoded distance goals in meters based on the scene number
+        if (scene_number_ == 1) {
+            // Simulation waypoints
+            distance_goals_ = {
+                {0.460, -0.050},
+                {0.460, -1.367},
+                {1.026, -1.367},
+                {1.026, -0.877},
+                {1.387, -0.877},
+                {1.387, -0.357},
+                {1.933, -0.357},
+                {1.933, 0.568},
+                {1.406, 0.568},
+                {1.406, 0.191},
+                {0.918, 0.191},
+                {0.650, 0.522},
+                {0.102, 0.522}
+            };
+        } else if (scene_number_ == 2) {
+            // CyberWorld waypoints (adjusted for starting position)
+            distance_goals_ = {
+                {1.731, 0.508},
+                {1.910, 0.164},
+                {0.931, -0.478},
+                {1.205, -0.916},
+                {1.636, -0.688},
+                {1.771, -1.263},
+                {1.416, -1.351},
+                {1.389, -1.796},
+                {0.876, -1.680},
+                {0.932, -0.899},
+                {0.454, -0.802},
+                {0.592, -0.361},
+                {0.184, -0.237}
+            };
+        } else {
+            RCLCPP_ERROR(this->get_logger(), "Invalid scene number: %d", scene_number_);
+            rclcpp::shutdown();
+            return;
+        }
 
         // PID parameters
         this->declare_parameter<double>("kp_l", 1.5);
@@ -73,6 +101,9 @@ private:
     double integral_l_, previous_error_l_;
     double integral_r_, previous_error_r_;
     bool control_traslation_;
+    int scene_number_;
+    double max_linear_speed_; // Maximum linear speed
+    double max_angular_speed_; // Maximum angular speed
 
     Eigen::Vector2d transformCoordinates(const Eigen::Vector2d& p_CA, const Eigen::Vector2d& p_BA, double theta) {
         // Create the rotation matrix using Eigen
@@ -99,8 +130,6 @@ private:
 
         if (current_goal_index_ < int(distance_goals_.size())) {
             std::vector<double> waypoint = distance_goals_[current_goal_index_];
-            //double goal_rotation = std::atan2(waypoint[1] - current_y, waypoint[0] - current_x);
-            //double error = goal_rotation + current_rotation;
             Eigen::Vector2d p_BA(current_x, current_y);
             Eigen::Vector2d p_CA(waypoint[0], waypoint[1]);
             Eigen::Vector2d p_CB = transformCoordinates(p_CA, p_BA, current_rotation);
@@ -111,6 +140,7 @@ private:
             previous_error_r_ = error;
 
             double control_signal = kp_r_ * error + ki_r_ * integral_r_ + kd_r_ * derivative;
+            control_signal = std::clamp(control_signal, -max_angular_speed_, max_angular_speed_); // Clamp to max angular speed
 
             // Publish the velocity command
             cmd_vel.angular.z = control_signal;
@@ -144,6 +174,7 @@ private:
             previous_error_l_ = error;
 
             double control_signal = kp_l_ * error + ki_l_ * integral_l_ + kd_l_ * derivative;
+            control_signal = std::clamp(control_signal, -max_linear_speed_, max_linear_speed_); // Clamp to max linear speed
 
             // Publish the velocity command
             cmd_vel.linear.x = control_signal;
@@ -156,15 +187,19 @@ private:
                 integral_l_ = 0;  // Reset integral term
                 control_traslation_ = false;
             }
-            
         }
     }
 };
 
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     rclcpp::init(argc, argv);
-    auto node = std::make_shared<MazeSolver>();
+
+    int scene_number = 1; // Default to simulation
+    if (argc > 1) {
+        scene_number = std::atoi(argv[1]);
+    }
+
+    auto node = std::make_shared<MazeSolver>(scene_number);
     rclcpp::spin(node);
     rclcpp::shutdown();
     return 0;
