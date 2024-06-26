@@ -15,7 +15,7 @@ class MazeSolver : public rclcpp::Node
 public:
     MazeSolver(int scene_number) 
         : Node("distance_controller"), current_goal_index_(0), scene_number_(scene_number),
-          max_linear_speed_(0.2), max_angular_speed_(0.2)  // Set maximum speeds here
+          max_linear_speed_(0.8), max_angular_speed_(0.8)  // Set maximum speeds here
     {
         // Initialize publisher
         velocity_publisher_ = this->create_publisher<geometry_msgs::msg::Twist>("cmd_vel", 10);
